@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sierra Steward</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <aside>
+    <div class="brand"><img id="brand-logo" src="logo.png" alt=""><h1 id="product">Sierra Steward</h1></div>
+    <nav aria-label="Dashboard sections">
+      <button class="nav" data-view="overview" aria-current="page">Bot</button>
+      <button class="nav" data-view="embeds">Embeds</button>
+      <button class="nav" data-view="tickets">Tickets</button>
+      <button class="nav" data-view="settings">Settings</button>
+    </nav>
+    <p class="connection"><span id="status">Stopped</span></p>
+  </aside>
+  <main>
+    <section id="overview">
+      <header class="operations-header"><div><h2 id="operations-title">Bot control</h2><p>Keep this window open while the bot is running.</p></div></header>
+      <div class="actions">
+        <button id="start" class="primary">Start bot</button><button id="stop" disabled>Stop</button><button id="restart" disabled>Restart</button>
+        <button id="check">Check server</button>
+      </div>
+      <article id="report-panel" hidden><h3>Server check</h3><pre id="report" aria-live="polite"></pre></article>
+      <article><h3 id="member-heading">Member messages</h3>
+        <div class="actions"><button id="preview-welcome">Preview welcome</button><button id="preview-goodbye">Preview goodbye</button></div>
+        <p id="member-note" class="note" role="status"></p><div id="member-preview" aria-live="polite"></div>
+      </article>
+      <article><h3>Activity</h3><pre id="activity" aria-live="polite">Waiting for the bot to start.</pre></article>
+    </section>
+    <section id="tickets" hidden>
+      <header><div><h2>Support tickets</h2><p>Review recent tickets and manage the Discord support panel.</p></div></header>
+      <article>
+        <h3>Support panel</h3>
+        <div class="actions"><button id="ticket-channels">Load channels</button><select id="ticket-destination" aria-label="Support panel channel"></select>
+          <button id="ticket-update" class="primary">Update existing panel</button><button id="ticket-post">Publish new panel</button></div>
+        <p id="ticket-note" class="note" role="status"></p>
+      </article>
+      <article><h3>Recent tickets</h3><div class="actions"><button id="ticket-refresh">Refresh tickets</button></div><ul id="ticket-list"></ul></article>
+    </section>
+    <section id="embeds" hidden>
+      <header><div><h2>Embed studio</h2><p>Paste Discord or Discohook JSON, or load a template.</p></div></header>
+      <div class="actions"><select id="templates" aria-label="Server template"></select><button id="load-template">Load template</button></div>
+      <div class="editors">
+        <label>Message JSON<textarea id="embed-json" spellcheck="false"></textarea></label>
+        <div aria-label="Embed preview"><label>Message in file<select id="message-select" disabled></select></label><div id="embed-preview"></div></div>
+      </div>
+      <div class="actions">
+        <button id="preview">Preview JSON</button><button id="channels">Load channels</button>
+        <select id="destination" aria-label="Destination channel"></select><button id="publish" class="primary">Publish</button>
+      </div>
+      <p id="embed-note" class="note" role="status"></p>
+    </section>
+    <section id="settings" hidden>
+      <header><div><h2>Settings</h2><p>Save changes, then start or restart Sierra Steward.</p></div></header>
+      <form id="settings-form">
+        <div id="settings-fields"></div>
+        <label class="token">Bot token<input id="token" type="password" autocomplete="new-password"></label>
+        <p id="token-state" class="note"></p>
+        <div class="actions"><button class="primary" id="save" type="submit">Save settings</button><button id="reload" type="button">Reload</button></div>
+      </form>
+      <p id="settings-note" class="note" role="status"></p>
+      <details id="branding" hidden>
+        <summary>Branding</summary>
+        <div class="fields"><label>Bot name<input id="brand-name" maxlength="32"></label><label>Logo<input id="brand-file" type="file" accept="image/png,image/jpeg"></label></div>
+        <p id="brand-note" class="note" role="status"></p>
+        <div class="actions"><button id="save-brand" class="primary">Save dashboard branding</button><button id="apply-brand">Apply to Discord bot</button></div>
+      </details>
+    </section>
+  </main>
+</body>
+</html>

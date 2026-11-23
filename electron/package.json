@@ -1,0 +1,13 @@
+{
+  "name": "sierra-steward-community",
+  "productName": "Sierra Steward Community",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "45.4.1"
+  }
+}

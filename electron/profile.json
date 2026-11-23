@@ -1,0 +1,42 @@
+{
+  "name": "Sierra Steward Community",
+  "personal": false,
+  "templates": [
+    {
+      "name": "Welcome",
+      "data": {
+        "embeds": [
+          {
+            "title": "Welcome aboard",
+            "description": "Read the rules and introduce yourself to the community.",
+            "color": 5793266
+          }
+        ]
+      }
+    },
+    {
+      "name": "Community announcement",
+      "data": {
+        "embeds": [
+          {
+            "title": "[[HEADLINE]]",
+            "description": "[[ANNOUNCEMENT DETAILS]]",
+            "color": 3244248
+          }
+        ]
+      }
+    },
+    {
+      "name": "Group flight",
+      "data": {
+        "embeds": [
+          {
+            "title": "Group flight briefing",
+            "description": "**Route** [[ROUTE]]\n**Departure** [[DATE AND TIME UTC]]\n**Simulator** [[SIMULATOR]]",
+            "color": 3244248
+          }
+        ]
+      }
+    }
+  ]
+}

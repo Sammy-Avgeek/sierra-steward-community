@@ -1,0 +1,10 @@
+Sierra Steward Terms of Use
+Version 1.0
+
+You may install and use Sierra Steward to operate Discord communities you are authorised to manage. Follow Discord's Terms of Service, Community Guidelines, and Developer Policy. Keep your Discord bot token private.
+
+Sierra Steward stores its settings, token, warning history, and ticket records on this computer. When the bot is connected, it sends messages and other requests to Discord using your bot token. Enabled news and offer checks read public publisher feeds and Steam store data. Discord and Steam apply their own terms.
+
+You control where the bot posts and how it moderates your community. Review those settings and tell members about automation and record keeping where appropriate. Check the retailer's store for the current price and availability before relying on an offer.
+
+Third-party software in this package remains subject to its respective licences. These terms do not limit any rights you have under applicable law.
