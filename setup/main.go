@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"crypto/sha256"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -35,37 +36,96 @@ func dialog(text string, flags uintptr) uintptr {
 	return result
 }
 
-func openPayload() (*zip.ReadCloser, error) {
+const payloadMarker = "SIERRA-APP-V1\x00"
+
+type payloadArchive struct {
+	*zip.Reader
+	file *os.File
+}
+
+func openPayload() (*payloadArchive, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	name := filepath.Join(filepath.Dir(self), payloadName)
-	file, err := os.Open(name)
+	file, err := os.Open(self)
 	if err != nil {
-		return nil, fmt.Errorf("extract the full setup ZIP and keep %s beside Setup: %w", payloadName, err)
+		return nil, err
 	}
-	digest := sha256.New()
-	_, err = io.Copy(digest, file)
+	archive, err := embeddedArchive(file)
+	if err != nil || archive != nil {
+		if err != nil {
+			file.Close()
+		}
+		return archive, err
+	}
 	file.Close()
+
+	// The personal edition also supports the original two-file setup package.
+	name := filepath.Join(filepath.Dir(self), payloadName)
+	file, err = os.Open(name)
 	if err != nil {
+		return nil, fmt.Errorf("installation archive unavailable. Download the complete installer again: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	archive, err = checkedArchive(file, io.NewSectionReader(file, 0, info.Size()))
+	if err != nil {
+		file.Close()
+	}
+	return archive, err
+}
+
+func embeddedArchive(file *os.File) (*payloadArchive, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	var footer [8 + len(payloadMarker)]byte
+	end := info.Size() - int64(len(footer))
+	if end < 0 {
+		return nil, nil
+	}
+	if _, err := file.ReadAt(footer[:], end); err != nil {
+		return nil, err
+	}
+	if string(footer[8:]) != payloadMarker {
+		return nil, nil
+	}
+	length := binary.LittleEndian.Uint64(footer[:8])
+	if length < 22 || length >= uint64(end) {
+		return nil, errors.New("the bundled installation archive has an invalid length")
+	}
+	return checkedArchive(file, io.NewSectionReader(file, end-int64(length), int64(length)))
+}
+
+func checkedArchive(file *os.File, stream *io.SectionReader) (*payloadArchive, error) {
+	digest := sha256.New()
+	if _, err := io.Copy(digest, stream); err != nil {
 		return nil, err
 	}
 	if hex.EncodeToString(digest.Sum(nil)) != payloadSHA {
 		return nil, errors.New("the installation archive failed its checksum")
 	}
-	return zip.OpenReader(name)
+	reader, err := zip.NewReader(stream, stream.Size())
+	if err != nil {
+		return nil, err
+	}
+	return &payloadArchive{Reader: reader, file: file}, nil
 }
 
 type progressUpdate func(percent int, detail string)
 
-func unpack(archive *zip.ReadCloser, root string, progress progressUpdate) error {
+func unpack(archive *zip.Reader, root string, progress progressUpdate) error {
 	percent := 0
 	for index, item := range archive.File {
 		next := 24 + index*59/len(archive.File)
 		if next != percent {
 			percent = next
-			progress(percent, "Extracting the dashboard and Discord worker…")
+			progress(percent, "Extracting application components…")
 		}
 		name := strings.TrimSuffix(item.Name, "/")
 		local := filepath.FromSlash(name)
@@ -89,8 +149,32 @@ func unpack(archive *zip.ReadCloser, root string, progress progressUpdate) error
 			return err
 		}
 	}
+	return nil
+}
+
+func buildDashboard(parts, destination string, bundled bool) error {
+	if !bundled {
+		return os.Rename(parts, destination)
+	}
+	if err := os.Rename(filepath.Join(parts, "runtime"), destination); err != nil {
+		return err
+	}
+	for _, move := range [][2]string{
+		{filepath.Join(destination, "electron.exe"), filepath.Join(destination, appExecutable)},
+		{filepath.Join(parts, "dashboard"), filepath.Join(destination, "resources", "app")},
+		{filepath.Join(parts, "worker", "SierraWorker.exe"), filepath.Join(destination, "resources", "SierraWorker.exe")},
+		{filepath.Join(parts, "notices", "THIRD-PARTY-NOTICES.txt"), filepath.Join(destination, "THIRD-PARTY-NOTICES.txt")},
+	} {
+		if err := os.Rename(move[0], move[1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyDashboard(root string) error {
 	for _, file := range []string{appExecutable, "resources/app/index.html", "resources/SierraWorker.exe"} {
-		if _, err := os.Stat(filepath.Join(root, file)); err != nil {
+		if info, err := os.Stat(filepath.Join(root, file)); err != nil || !info.Mode().IsRegular() {
 			return fmt.Errorf("missing setup component %s", file)
 		}
 	}
@@ -118,7 +202,7 @@ func install(local string, progress progressUpdate) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer archive.Close()
+	defer archive.file.Close()
 	stage, err := os.MkdirTemp(local, "SierraSetup-")
 	if err != nil {
 		return "", err
@@ -129,12 +213,21 @@ func install(local string, progress progressUpdate) (string, error) {
 			os.RemoveAll(stage)
 		}
 	}()
+	parts := filepath.Join(stage, "parts")
+	if err := unpack(archive.Reader, parts, progress); err != nil {
+		return "", err
+	}
 	stagedApp := filepath.Join(stage, "app")
-	if err := unpack(archive, stagedApp, progress); err != nil {
+	progress(84, "Building the Electron dashboard…")
+	componentLayout := slices.ContainsFunc(archive.File, func(file *zip.File) bool { return file.Name == "runtime/electron.exe" })
+	if err := buildDashboard(parts, stagedApp, componentLayout); err != nil {
+		return "", fmt.Errorf("could not build the Electron dashboard: %w", err)
+	}
+	if err := verifyDashboard(stagedApp); err != nil {
 		return "", err
 	}
 	installed := filepath.Join(local, product)
-	progress(86, "Installing the dashboard…")
+	progress(90, "Installing the dashboard…")
 	previous := filepath.Join(stage, "previous")
 	if _, err := os.Stat(installed); err == nil {
 		if err := os.Rename(installed, previous); err != nil {

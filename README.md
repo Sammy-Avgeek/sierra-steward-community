@@ -4,8 +4,8 @@ Sierra Steward is a self-hosted Windows dashboard and Discord bot. The dashboard
 
 ## Install on Windows x64
 
-1. Extract the entire Windows release ZIP. Keep the app archive beside `SierraStewardCommunitySetup.exe`.
-2. Open Setup, review the terms, select **I agree**, and click **Install**. Open the dashboard when setup finishes.
+1. Download `SierraStewardCommunityInstaller.exe` from the [latest release](https://github.com/Sammy-Avgeek/sierra-steward-community/releases/latest) and run it.
+2. Review the terms, select **I agree**, and click **Install**. Setup builds the runnable Electron app from its bundled components. Open the dashboard when setup finishes.
 3. Create your own Discord application and install it on a server you manage. Use the `bot` and `applications.commands` scopes and enable **Server Members Intent**. [Discord developer setup](https://docs.discord.com/developers/quick-start/getting-started)
 4. In the dashboard, enter the bot token, application ID, server ID, welcome channel ID, private moderation log channel ID, and default member role ID. Save and run **Check server**, then **Start bot**.
 
@@ -31,6 +31,6 @@ py -m venv .venv
 .\.venv\Scripts\python.exe .\build_windows.py
 ```
 
-The build downloads the pinned Electron version, packages the Discord worker, compiles the Go setup executable, and verifies the packaged install in a temporary directory. The Windows ZIP is written to `build`.
+The build downloads the pinned Electron version, packages the Discord worker, and bundles the runtime and dashboard files into the Go installer. The build verifies that the standalone installer can assemble the app in a temporary directory. `SierraStewardCommunityInstaller.exe` is written to `build`.
 
 See `setup/TERMS.txt` for the installer terms and `THIRD-PARTY-NOTICES.txt` for bundled dependency notices.
