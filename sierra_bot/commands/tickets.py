@@ -107,7 +107,7 @@ async def close_command(
     store = interaction.client.tickets
     records = await store.select("channel_id = ?", (str(interaction.channel_id),))
     if not records:
-        await reply_private(interaction, "Use this command inside a Sierra Steward ticket.")
+        await reply_private(interaction, "Use this command inside a ticket channel created by the bot.")
         return
     if not store.member_can_close(interaction.user, records[0]):
         await reply_private(interaction, "Ask the assigned ticket staff to close this ticket.")

@@ -157,7 +157,7 @@ async def check_server(settings: Settings, token: str) -> str:
             else:
                 registered = {command.name for command in commands if command.type is discord.AppCommandType.chat_input}
                 missing = sorted({command.name for command in SLASH_COMMANDS} - registered)
-                lines.append(result("Slash commands", "All Sierra Steward commands are registered in this server.", [
+                lines.append(result("Slash commands", "All bot commands are registered in this server.", [
                     f"Missing {', '.join('/' + name for name in missing)}. Reopen the app and start the bot to sync commands."
                     if missing else "",
                 ]))

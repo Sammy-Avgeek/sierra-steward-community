@@ -33,7 +33,7 @@ def installation_lock(directory: Path):
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             if error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                raise AlreadyRunningError("Sierra Steward is already open in this folder.") from error
+                raise AlreadyRunningError("The bot is already running with these settings.") from error
             raise
         yield
 

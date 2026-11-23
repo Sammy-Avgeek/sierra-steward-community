@@ -13,7 +13,7 @@ import discord
 
 from sierra_bot.bot import SierraBot
 from sierra_bot.commands.tickets import find_ticket_panel, send_ticket_panel
-from sierra_bot.config import PROJECT_DIR, SETTINGS_FIELDS, ConfigError, Settings, message_style, read_local_settings, save_local_settings
+from sierra_bot.config import PROJECT_DIR, SETTINGS_FIELDS, ConfigError, Settings, message_style, read_local_settings, save_local_settings, save_verified_bot
 from sierra_bot.embed_json import MAX_JSON_SIZE, load_message_json, read_message
 from sierra_bot.runtime import AlreadyRunningError, configure_logging, installation_lock
 from sierra_bot.server_health import check_server
@@ -72,30 +72,13 @@ async def discord_action(action: str, request: dict, settings: Settings, token: 
         return [{"number": ticket.id, "channel": str(ticket.channel_id) if ticket.channel_id else "",
                  "open": ticket.closed_at is None, "guild": str(settings.guild_id),
                  "type": ticket.route.name if ticket.route is not None else "Support"} for ticket in tickets]
-    async with asyncio.timeout(20), discord.Client(intents=discord.Intents.none()) as client:
-        await client.login(token)
+    async with discord.Client(intents=discord.Intents.none()) as client:
+        async with asyncio.timeout(15):
+            await client.login(token)
         if client.application_id != settings.client_id:
             raise ValueError("The Application ID and token must belong to the same Discord bot.")
         if action == "branding":
-            name = request["name"].strip()
-            if not 2 <= len(name) <= 32:
-                raise ValueError("Enter a Discord bot name from 2 to 32 characters.")
-            try:
-                logo = base64.b64decode(request.get("logo") or "", validate=True)
-            except binascii.Error as error:
-                raise ValueError("Choose a PNG or JPEG logo.") from error
-            if len(logo) > 1_250_000:
-                raise ValueError("Choose a logo under 1.25 MB.")
-            params = {"username": name}
-            if logo:
-                params["avatar"] = logo
-            await client.user.edit(**params)
-            if logo:
-                try:
-                    await client.application.edit(icon=logo)
-                except discord.HTTPException:
-                    return "Discord bot name and avatar updated. Discord declined the application icon update."
-            return "Discord branding updated."
+            return await apply_bot_brand(client, request["name"].strip(), decode_logo(request.get("logo") or ""))
         guild = await client.fetch_guild(settings.guild_id)
         bot, channels = await asyncio.gather(guild.fetch_member(client.user.id), guild.fetch_channels())
         destinations = {channel.id: channel for channel in channels
@@ -113,7 +96,7 @@ async def discord_action(action: str, request: dict, settings: Settings, token: 
                         raise ValueError("Grant the bot Read Message History to find the existing panel.")
                     existing = await find_ticket_panel(channel, bot.id)
                     if existing is None:
-                        raise ValueError("No Sierra Steward ticket panel was found in this channel's latest 100 messages.")
+                        raise ValueError("No ticket panel was found in this channel's latest 100 messages.")
                 panel = await send_ticket_panel(channel, settings, existing)
                 return panel.jump_url
             draft = parse_embed(request)
@@ -121,6 +104,52 @@ async def discord_action(action: str, request: dict, settings: Settings, token: 
                                         allowed_mentions=discord.AllowedMentions.none())
             return posted.jump_url
     raise ValueError("Unknown Discord action.")
+
+
+def decode_logo(encoded: str) -> bytes:
+    try:
+        image = base64.b64decode(encoded, validate=True)
+    except binascii.Error as error:
+        raise ValueError("Choose a PNG or JPEG logo.") from error
+    if len(image) > 1_250_000:
+        raise ValueError("Choose a logo up to 1.25 MB.")
+    return image
+
+
+async def apply_bot_brand(client: discord.Client, name: str, logo: bytes) -> str:
+    if not 2 <= len(name) <= 32:
+        raise ValueError("Enter a Discord bot name from 2 to 32 characters.")
+    params = {"username": name}
+    if logo:
+        params["avatar"] = logo
+    await client.user.edit(**params)
+    if logo:
+        try:
+            await client.application.edit(icon=logo)
+        except discord.HTTPException:
+            return "The Discord bot name and avatar were updated. Discord declined the application icon."
+    return "Discord bot name and image updated."
+
+
+async def provision_bot(request: dict) -> dict:
+    token = (read_local_settings().get("DISCORD_TOKEN") or "") if request.get("use_saved") is True else request.get("token", "")
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("Paste the bot token from the Developer Portal.")
+    token = token.strip()
+    async with asyncio.timeout(20), discord.Client(intents=discord.Intents.none()) as client:
+        await client.login(token)
+        if not client.user.bot or client.application_id is None:
+            raise ValueError("Discord did not verify a bot application for this token.")
+        save_verified_bot(token, client.application_id)
+        label = "Discord bot verified."
+        try:
+            encoded = request["logo"].partition(",")[2]
+            logo = decode_logo(encoded)
+            async with asyncio.timeout(15):
+                label += " " + await apply_bot_brand(client, request["name"], logo)
+        except (discord.HTTPException, aiohttp.ClientError, ValueError, TimeoutError):
+            label += " Update its name and image later from Branding in the dashboard."
+        return {"id": str(client.application_id), "message": label}
 
 
 def parse_embed(request: dict):
@@ -132,6 +161,8 @@ def parse_embed(request: dict):
 
 
 def command(action: str, request: dict):
+    if action == "provision-bot":
+        return asyncio.run(provision_bot(request))
     if action == "load":
         return saved_settings()
     if action == "save":
@@ -182,7 +213,7 @@ def main() -> int:
     except (ConfigError, ValueError) as error:
         output = {"error": str(error)}
     except discord.LoginFailure:
-        output = {"error": "Discord rejected the saved token."}
+        output = {"error": "Discord rejected this bot token. Copy the current token from the Bot page."}
     except (discord.HTTPException, aiohttp.ClientError, OSError, TimeoutError, KeyError, TypeError):
         output = {"error": "Could not complete this action. Check the Discord connection, settings, and channel permissions."}
     print(json.dumps(output, ensure_ascii=True))

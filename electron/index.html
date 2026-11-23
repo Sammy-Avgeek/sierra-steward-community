@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sierra Steward</title>
+  <title>Community Console</title>
   <link rel="stylesheet" href="style.css">
   <script src="renderer.js" defer></script>
 </head>
 <body>
   <aside>
-    <div class="brand"><img id="brand-logo" src="logo.png" alt=""><h1 id="product">Sierra Steward</h1></div>
+    <div class="brand"><img id="brand-logo" src="logo.png" alt=""><h1 id="product">Community Console</h1></div>
     <nav aria-label="Dashboard sections">
       <button class="nav" data-view="overview" aria-current="page">Bot</button>
       <button class="nav" data-view="embeds">Embeds</button>
@@ -57,7 +57,8 @@
       <p id="embed-note" class="note" role="status"></p>
     </section>
     <section id="settings" hidden>
-      <header><div><h2>Settings</h2><p>Save changes, then start or restart Sierra Steward.</p></div></header>
+      <header><div><h2>Settings</h2><p>Save changes, then start or restart the bot.</p></div></header>
+      <div class="actions"><button id="developer-portal" type="button">Open Discord Developer Portal</button></div>
       <form id="settings-form">
         <div id="settings-fields"></div>
         <label class="token">Bot token<input id="token" type="password" autocomplete="new-password"></label>

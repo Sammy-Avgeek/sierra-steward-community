@@ -63,7 +63,7 @@ class RolePicker(discord.ui.Select):
         removing = role in member.roles
         change_role = member.remove_roles if removing else member.add_roles
         try:
-            await change_role(role, reason="Sierra Steward self-assigned roles")
+            await change_role(role, reason="Community Console self-assigned roles")
         except discord.HTTPException:
             await reply_private(interaction, "Discord could not update that role. Ask staff to check access.")
             return

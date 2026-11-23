@@ -1,4 +1,4 @@
-Sierra Steward bundled third-party notices
+Community Console bundled third-party notices
 
 Python 3.14.10
 

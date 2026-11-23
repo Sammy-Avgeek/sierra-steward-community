@@ -181,6 +181,7 @@ $('settings-form').onsubmit = async event => {
   $('save').disabled = false;
 };
 $('reload').onclick = loadSettings;
+$('developer-portal').onclick = () => request('developer-portal', {}, $('settings-note'));
 $('preview').onclick = () => preview(true);
 $('message-select').onchange = () => preview();
 $('embed-json').oninput = () => { $('message-select').replaceChildren(); $('message-select').disabled = true; };

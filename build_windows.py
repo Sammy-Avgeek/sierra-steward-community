@@ -3,13 +3,14 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 
 ROOT = Path(__file__).resolve().parent
@@ -32,8 +33,10 @@ def main():
         raise SystemExit("Install Node.js and Go and add both to PATH.")
     profile = json.loads((APP / "profile.json").read_text(encoding="utf-8"))
     personal = profile["personal"]
-    stem = "SierraSteward" if personal else "SierraStewardCommunity"
-    product = "Sierra Steward" if personal else "Sierra Steward Community"
+    product = profile["name"]
+    if not re.fullmatch(r"[A-Za-z0-9 ]{2,40}", product):
+        raise SystemExit("Use a package name containing letters, digits, and spaces.")
+    stem = product.replace(" ", "")
     BUILD.mkdir(exist_ok=True)
     run([npm, "ci"], cwd=APP)
     run([npm, "exec", "--", "install-electron"], cwd=APP)
@@ -56,28 +59,20 @@ def main():
         package.write(ROOT / "THIRD-PARTY-NOTICES.txt", "notices/THIRD-PARTY-NOTICES.txt")
     with payload.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    setup = BUILD / (f"{stem}Setup.exe" if personal else f"{stem}Installer.exe")
+    setup = BUILD / f"{stem}Installer.exe"
     flags = (f"-s -w -H windowsgui -X 'main.product={product}' -X main.appExecutable={stem}.exe "
+             f"-X main.edition={'personal' if personal else 'community'} "
              f"-X main.payloadName={payload.name} -X main.payloadSHA={digest}")
-    run([go, "build", "-trimpath", "-ldflags", flags, "-o", str(setup), "main.go", "wizard.go"],
+    run([go, "build", "-trimpath", "-ldflags", flags, "-o", str(setup),
+         "main.go", "wizard.go", "wizard_ui.go", "branding.go"],
         cwd=ROOT / "setup", env={**os.environ, "CGO_ENABLED": "0"})
-    if not personal:
-        with setup.open("ab") as installer, payload.open("rb") as components:
-            shutil.copyfileobj(components, installer)
-            installer.write(struct.pack("<Q", payload.stat().st_size) + PAYLOAD_MARKER)
-        # Verify the public installer without a companion archive in its directory.
-        with tempfile.TemporaryDirectory(prefix="sierra-installer-") as scratch:
-            independent = shutil.copy2(setup, Path(scratch) / setup.name)
-            run([independent, "--verify"])
-        print(setup)
-        return
-
-    run([setup, "--verify"])
-    release = BUILD / f"{stem}-Windows.zip"
-    with ZipFile(release, "w", ZIP_STORED) as package:
-        for file in (setup, payload, ROOT / "README.md", ROOT / "setup/TERMS.txt", ROOT / "THIRD-PARTY-NOTICES.txt"):
-            package.write(file, file.name)
-    print(release)
+    with setup.open("ab") as installer, payload.open("rb") as components:
+        shutil.copyfileobj(components, installer)
+        installer.write(struct.pack("<Q", payload.stat().st_size) + PAYLOAD_MARKER)
+    with tempfile.TemporaryDirectory(prefix="dashboard-installer-") as scratch:
+        independent = shutil.copy2(setup, Path(scratch) / setup.name)
+        run([independent, "--verify"])
+    print(setup)
 
 
 if __name__ == "__main__":

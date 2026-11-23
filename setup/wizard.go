@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -56,18 +59,16 @@ type progressState struct {
 	detail, executable string
 	err                error
 	finished           bool
+	verification       bool
 }
 
 type wizard struct {
-	window, instance, font, titleFont                           uintptr
-	headerBrush, headerColour                                   uintptr
-	header                                                      []uintptr
-	agreement, desktop, menu, install, exit, bar, title, detail uintptr
-	options, progress                                           []uintptr
-	local, executable                                           string
-	busy, failed, autostart                                     bool
-	mutex                                                       sync.Mutex
-	state                                                       progressState
+	window, instance  uintptr
+	local, executable string
+	busy, autostart   bool
+	mutex             sync.Mutex
+	state             progressState
+	ui                wizardUI
 }
 
 func wide(value string) *uint16 {
@@ -84,67 +85,6 @@ func selected(control uintptr) bool {
 	return value == 1
 }
 
-func (w *wizard) control(kind, title string, style uint32, x, y, width, height, id int) uintptr {
-	child, _, _ := createWindow.Call(0, uintptr(unsafe.Pointer(wide(kind))), uintptr(unsafe.Pointer(wide(title))),
-		uintptr(0x50000000|style), uintptr(x), uintptr(y), uintptr(width), uintptr(height), w.window, uintptr(id), w.instance, 0)
-	send.Call(child, 0x0030, w.font, 1)
-	return child
-}
-
-func (w *wizard) label(value string, x, y, width, height int) uintptr {
-	return w.control("STATIC", value, 0, x, y, width, height, 0)
-}
-
-func showGroup(controls []uintptr, state uintptr) {
-	for _, control := range controls {
-		show.Call(control, state)
-	}
-}
-
-func font(height, weight uintptr) uintptr {
-	font, _, _ := gdi32.NewProc("CreateFontW").Call(height, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 0, 0,
-		uintptr(unsafe.Pointer(wide("Segoe UI"))))
-	return font
-}
-
-func (w *wizard) build() {
-	w.font, w.titleFont = font(^uintptr(16), 400), font(^uintptr(28), 650)
-	w.headerColour = 0x00332D14
-	if product == "Sierra Steward" {
-		w.headerColour = 0x00452B12
-	}
-	w.headerBrush, _, _ = gdi32.NewProc("CreateSolidBrush").Call(w.headerColour)
-	background := w.label("", 0, 0, 602, 90)
-	heading := w.label(product, 24, 16, 540, 42)
-	send.Call(heading, 0x0030, w.titleFont, 1)
-	summary := "Install the Discord community dashboard"
-	if product == "Sierra Steward" {
-		summary = "Install the Sierra Originals flight operations dashboard"
-	}
-	subtitle := w.label(summary, 25, 64, 540, 24)
-	w.header = []uintptr{background, heading, subtitle}
-	user32.NewProc("SetWindowPos").Call(background, 1, 0, 0, 0, 0, 3)
-	termsHeading := w.label("Read the Terms of Use before continuing.", 25, 100, 540, 22)
-	termsText := strings.ReplaceAll(strings.TrimSpace(strings.ReplaceAll(terms, "\r\n", "\n")), "\n", "\r\n")
-	termsBox := w.control("EDIT", termsText, tabStop|0x00800000|0x00200000|0x0800|0x0040|0x0004, 25, 128, 545, 195, 0)
-	w.agreement = w.control("BUTTON", "I agree to the Terms of Use", tabStop|3, 25, 333, 545, 24, agreementID)
-	location := w.label("Install to  "+filepath.Join(w.local, product), 25, 369, 545, 38)
-	w.desktop = w.control("BUTTON", "Create a desktop shortcut", tabStop|3, 25, 410, 250, 25, 104)
-	w.menu = w.control("BUTTON", "Add to the Start menu", tabStop|3, 293, 410, 245, 25, 105)
-	send.Call(w.desktop, 0x00F1, 1, 0)
-	send.Call(w.menu, 0x00F1, 1, 0)
-	w.options = []uintptr{termsHeading, termsBox, w.agreement, location, w.desktop, w.menu}
-	w.title = w.label("Installing", 25, 117, 545, 40)
-	send.Call(w.title, 0x0030, w.titleFont, 1)
-	w.bar = w.control("msctls_progress32", "", 0, 25, 175, 545, 20, 0)
-	w.detail = w.label("Preparing installation…", 25, 215, 545, 190)
-	w.progress = []uintptr{w.title, w.bar, w.detail}
-	showGroup(w.progress, 0)
-	w.exit = w.control("BUTTON", "Cancel", tabStop, 305, 471, 105, 32, exitID)
-	w.install = w.control("BUTTON", "Install", tabStop|1, 425, 471, 145, 32, installID)
-	enable.Call(w.install, 0)
-}
-
 func (w *wizard) post(state progressState) {
 	w.mutex.Lock()
 	w.state = state
@@ -153,28 +93,26 @@ func (w *wizard) post(state progressState) {
 }
 
 func (w *wizard) begin() {
-	if !selected(w.agreement) {
+	if !selected(w.ui.agreement) || (edition == "community" && !w.brandReady()) {
 		return
 	}
-	desktop, menu := selected(w.desktop), selected(w.menu)
+	desktop, menu := selected(w.ui.desktop), selected(w.ui.menu)
+	w.ui.shortcutDesktop, w.ui.shortcutMenu = desktop, menu
 	w.busy = true
-	showGroup(w.options, 0)
-	showGroup(w.progress, 5)
-	caption(w.title, "Installing "+product)
-	enable.Call(w.install, 0)
-	enable.Call(w.exit, 0)
+	w.ui.percent = 0
+	w.showPage(pageWork)
 	go func() {
 		executable, err := installAfterAgreement(true, w.local, func(percent int, detail string) {
 			w.post(progressState{percent: percent, detail: detail})
 		})
-		detail := "Setup is complete. Open the dashboard to get started."
-		if err == nil && (desktop || menu) {
+		var warnings []string
+		if err == nil && edition == "personal" && (desktop || menu) {
 			w.post(progressState{percent: 95, detail: "Creating Windows shortcuts…"})
 			if createShortcuts(executable, desktop, menu) != nil {
-				detail += " Windows could not create the selected shortcuts. The dashboard is installed."
+				warnings = append(warnings, "Windows could not create one or more of the selected shortcuts.")
 			}
 		}
-		w.post(progressState{percent: 100, detail: detail, executable: executable, err: err, finished: true})
+		w.post(progressState{percent: 100, detail: joinWarnings(warnings), executable: executable, err: err, finished: true})
 	}()
 }
 
@@ -185,24 +123,117 @@ func (w *wizard) refresh() {
 	w.mutex.Lock()
 	state := w.state
 	w.mutex.Unlock()
-	send.Call(w.bar, 0x0402, uintptr(state.percent), 0)
-	caption(w.detail, state.detail)
-	if !state.finished {
+	if w.ui.page == pageConnect {
+		if !state.verification {
+			return
+		}
+		w.busy = false
+		if state.err != nil {
+			caption(w.ui.connectStatus, state.err.Error())
+			w.syncButtons()
+			return
+		}
+		caption(w.ui.token, "")
+		caption(w.ui.readyNote, state.detail)
+		w.showPage(pageDone)
 		return
 	}
-	w.busy, w.failed, w.executable = false, state.err != nil, state.executable
-	if w.failed {
-		caption(w.title, "Setup needs attention")
-		caption(w.detail, state.err.Error())
-		caption(w.install, "Back")
+	w.ui.percent = state.percent
+	if !state.finished {
+		caption(w.ui.workDetail, state.detail)
+		caption(w.ui.workPercent, fmt.Sprintf("%d%%", state.percent))
+		w.repaint()
+		return
+	}
+	w.busy, w.executable = false, state.executable
+	if state.err != nil {
+		caption(w.ui.errorDetail, state.err.Error())
+		w.showPage(pageError)
 		fmt.Fprintln(os.Stderr, state.err)
 	} else {
-		caption(w.title, "Ready to open")
-		caption(w.install, "Open dashboard")
+		if edition == "community" {
+			w.showPage(pageConnect)
+		} else {
+			caption(w.ui.readyNote, state.detail)
+			w.showPage(pageDone)
+		}
 	}
-	caption(w.exit, "Close")
-	enable.Call(w.install, 1)
-	enable.Call(w.exit, 1)
+}
+
+func (w *wizard) openPortal() error {
+	process := exec.Command(w.executable, "--setup-portal")
+	process.Dir = filepath.Dir(w.executable)
+	if err := process.Start(); err != nil {
+		return err
+	}
+	return process.Process.Release()
+}
+
+func (w *wizard) openPortalInBrowser() bool {
+	shellExecute := syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
+	result, _, _ := shellExecute.Call(w.window, uintptr(unsafe.Pointer(wide("open"))),
+		uintptr(unsafe.Pointer(wide("https://discord.com/developers/applications"))), 0, 0, 1)
+	return result > 32
+}
+
+func (w *wizard) connectBot(useSaved bool) {
+	token := strings.TrimSpace(nativeText(w.ui.token))
+	if (!useSaved && token == "") || w.busy {
+		return
+	}
+	dir, err := savedDirectory()
+	if err != nil {
+		caption(w.ui.connectStatus, err.Error())
+		return
+	}
+	brand := w.ui.brand
+	desktop, menu := w.ui.shortcutDesktop, w.ui.shortcutMenu
+	w.busy = true
+	w.syncButtons()
+	caption(w.ui.connectStatus, "Verifying the bot with Discord…")
+	go func() {
+		detail, err := verifyBot(filepath.Join(filepath.Dir(w.executable), "resources", "SierraWorker.exe"), dir, token, brand, useSaved)
+		if err == nil {
+			if saveBranding(brand) != nil {
+				detail += " The dashboard could not save your bot name and image locally."
+			}
+			if (desktop || menu) && createShortcuts(w.executable, desktop, menu) != nil {
+				detail += " Windows could not create one or more of the selected shortcuts."
+			}
+		}
+		w.post(progressState{detail: detail, err: err, finished: true, verification: true})
+	}()
+}
+
+func verifyBot(worker, directory, token string, brand botBrand, useSaved bool) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
+	defer cancel()
+	request, err := json.Marshal(map[string]any{"token": token, "name": brand.Name, "logo": brand.Logo, "use_saved": useSaved})
+	if err != nil {
+		return "", err
+	}
+	process := exec.CommandContext(ctx, worker, "provision-bot")
+	process.Stdin = bytes.NewReader(request)
+	process.Env = append(os.Environ(), "SIERRA_CONFIG_DIR="+directory, "PYTHONUTF8=1")
+	process.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	response, err := process.Output()
+	if err != nil {
+		return "", errors.New("Could not verify the bot. Check the Discord connection and try again.")
+	}
+	var result struct {
+		Value struct {
+			ID      string
+			Message string
+		}
+		Error string
+	}
+	if json.Unmarshal(response, &result) != nil || (result.Error == "" && result.Value.ID == "") {
+		return "", errors.New("Discord verification returned an incomplete result. Please try again.")
+	}
+	if result.Error != "" {
+		return "", errors.New(result.Error)
+	}
+	return result.Value.Message, nil
 }
 
 func (w *wizard) open() error {
@@ -218,45 +249,28 @@ func (w *wizard) open() error {
 func handleWindow(window uintptr, message uint32, wParam, lParam uintptr) uintptr {
 	w := setup
 	switch message {
-	case 0x0138:
-		if w != nil && slices.Contains(w.header, lParam) {
-			gdi32.NewProc("SetTextColor").Call(wParam, 0x00FFF9EF)
-			gdi32.NewProc("SetBkColor").Call(wParam, w.headerColour)
-			return w.headerBrush
+	case 0x000F:
+		if w.ui.ready {
+			w.paint()
+			return 0
+		}
+	case 0x0014:
+		if w.ui.ready {
+			return 1
+		}
+	case 0x0133, 0x0135, 0x0138:
+		if style, ok := w.ui.labels[lParam]; ok {
+			return w.colourControl(wParam, style)
+		}
+	case 0x002B:
+		if lParam != 0 && w.drawButton((*drawItem)(unsafe.Pointer(lParam))) {
+			return 1
 		}
 	case 0x0111:
-		switch wParam & 0xffff {
-		case agreementID:
-			var state uintptr
-			if selected(w.agreement) {
-				state = 1
-			}
-			enable.Call(w.install, state)
-		case installID:
-			if w.busy {
-				return 0
-			}
-			if w.failed {
-				w.failed = false
-				showGroup(w.progress, 0)
-				showGroup(w.options, 5)
-				caption(w.install, "Install")
-				caption(w.exit, "Cancel")
-			} else if w.executable != "" {
-				if err := w.open(); err != nil {
-					dialog(err.Error(), 0x10)
-				} else {
-					user32.NewProc("DestroyWindow").Call(window)
-				}
-			} else {
-				w.begin()
-			}
-		case exitID, 2:
-			if !w.busy {
-				user32.NewProc("DestroyWindow").Call(window)
-			}
+		if w.ui.ready {
+			w.command(wParam)
+			return 0
 		}
-		return 0
 	case progressMessage:
 		w.refresh()
 		return 0
@@ -265,6 +279,7 @@ func handleWindow(window uintptr, message uint32, wParam, lParam uintptr) uintpt
 			return 0
 		}
 	case 0x0002:
+		w.ui.release()
 		user32.NewProc("PostQuitMessage").Call(0)
 		return 0
 	}
@@ -275,10 +290,10 @@ func handleWindow(window uintptr, message uint32, wParam, lParam uintptr) uintpt
 func showWizard(autostart bool) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	syscall.NewLazyDLL("comctl32.dll").NewProc("InitCommonControls").Call()
+	user32.NewProc("SetProcessDPIAware").Call()
 	instance, _, _ := syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW").Call(0)
 	cursor, _, _ := user32.NewProc("LoadCursorW").Call(0, 32512)
-	className := wide("SierraStewardSetupWizard")
+	className := wide("DiscordDashboardSetup")
 	registration := class{size: uint32(unsafe.Sizeof(class{})), proc: syscall.NewCallback(handleWindow),
 		instance: instance, cursor: cursor, background: 6, name: className}
 	if atom, _, err := user32.NewProc("RegisterClassExW").Call(uintptr(unsafe.Pointer(&registration))); atom == 0 {
@@ -288,8 +303,9 @@ func showWizard(autostart bool) error {
 	if !filepath.IsAbs(setup.local) {
 		return errors.New("Windows could not find your local application folder")
 	}
+	x, y, width, height := setup.measure()
 	window, _, err := createWindow.Call(0, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(wide(product+" Setup"))),
-		0x00CA0000, 0x80000000, 0x80000000, 618, 559, 0, 0, instance, 0)
+		windowStyle, uintptr(x), uintptr(y), uintptr(width), uintptr(height), 0, 0, instance, 0)
 	if window == 0 {
 		return err
 	}

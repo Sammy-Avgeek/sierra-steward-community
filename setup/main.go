@@ -22,9 +22,10 @@ import (
 var terms string
 
 var (
-	product       = "Sierra Steward Community"
-	appExecutable = "SierraStewardCommunity.exe"
-	payloadName   = "SierraStewardCommunity.app.zip"
+	product       = "Community Console"
+	edition       = "community"
+	appExecutable = "CommunityConsole.exe"
+	payloadName   = "CommunityConsole.app.zip"
 	payloadSHA    string
 	messageBox    = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
 )
@@ -249,7 +250,7 @@ func install(local string, progress progressUpdate) (string, error) {
 	return filepath.Join(installed, appExecutable), nil
 }
 
-var errAgreementRequired = errors.New("accept the terms to install Sierra Steward")
+var errAgreementRequired = errors.New("accept the terms before installing")
 
 func installAfterAgreement(accepted bool, local string, progress progressUpdate) (string, error) {
 	if !accepted {

@@ -66,7 +66,7 @@ class SpamTrap:
             and bot.top_role > member.top_role and not member.is_timed_out()
         ):
             try:
-                await member.timeout(timedelta(minutes=duration), reason="Sierra Steward spam trap")
+                await member.timeout(timedelta(minutes=duration), reason="Community Console spam trap")
             except discord.HTTPException:
                 logger.warning("Could not apply spam-trap timeout to member %s", member.id)
             else:

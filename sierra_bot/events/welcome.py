@@ -41,7 +41,7 @@ async def welcome_member(member: discord.Member, settings: Settings) -> None:
         logger.warning("Configured Member role unavailable for member %s", member.id)
     elif role not in member.roles:
         try:
-            await member.add_roles(role, reason="Sierra Steward onboarding")
+            await member.add_roles(role, reason="Community Console onboarding")
         except discord.NotFound as error:
             if error.code == 10007:  # The member left before Discord processed the request.
                 return

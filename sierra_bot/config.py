@@ -290,6 +290,18 @@ def save_local_settings(fields: Mapping[str, str], new_token: str) -> None:
         changes["DISCORD_TOKEN"] = new_token.strip()
     Settings.from_values({**current, **changes, **os.environ})
 
+    write_settings(path, before, changes)
+
+
+def save_verified_bot(token: str, application_id: int) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{20,512}", token) or not 0 < application_id < 2**64:
+        raise ConfigError("The verified Discord credentials could not be saved.")
+    path = PROJECT_DIR / ".env"
+    before = path.read_bytes() if path.exists() else b""
+    write_settings(path, before, {"DISCORD_TOKEN": token, "CLIENT_ID": str(application_id)})
+
+
+def write_settings(path: Path, before: bytes, changes: Mapping[str, str]) -> None:
     source = before.decode("utf-8-sig")
     for key, value in changes.items():
         multiline = key in MULTILINE_SETTINGS

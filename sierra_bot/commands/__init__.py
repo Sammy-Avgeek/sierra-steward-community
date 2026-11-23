@@ -1,1 +1,1 @@
-"""Slash commands for Sierra Steward."""
+"""Slash commands for Community Console."""

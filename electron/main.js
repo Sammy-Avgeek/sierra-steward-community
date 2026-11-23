@@ -1,27 +1,34 @@
-const {app, BrowserWindow, ipcMain, nativeImage, shell} = require('electron');
+const {app, BrowserWindow, ipcMain, nativeImage, session, shell} = require('electron');
 const {spawn} = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const profileFile = path.join(__dirname, 'profile.json');
 const profile = fs.existsSync(profileFile) ? JSON.parse(fs.readFileSync(profileFile, 'utf8')) : {
-  name: 'Sierra Steward Community', personal: false, templates: []
+  name: 'Community Console', personal: false, templates: []
 };
 app.setName(profile.name);
 
 const smoke = process.argv.includes('--smoke-test');
+const setupPortal = process.argv.includes('--setup-portal');
 const testDirectory = smoke && process.env.SIERRA_TEST_DATA_DIR;
-const fallback = testDirectory || path.join(app.getPath('appData'), profile.name);
-const personalDirectory = path.join(app.getPath('downloads'), 'Sierra Steward');
-const dataDirectory = !smoke && profile.personal && fs.existsSync(path.join(personalDirectory, '.env')) ? personalDirectory : fallback;
+const appData = app.getPath('appData');
+const fallback = testDirectory || path.join(appData, profile.name);
+const legacyName = 'Sierra Steward Community';
+const legacyDirectory = path.join(appData, legacyName);
+const hasSettings = directory => ['.env', 'branding.json', 'data'].some(file => fs.existsSync(path.join(directory, file)));
+const dataDirectory = !smoke && !hasSettings(fallback) && hasSettings(legacyDirectory) ? legacyDirectory : fallback;
 fs.mkdirSync(fallback, {recursive: true});
-app.setPath('userData', fallback);
+const portalData = setupPortal ? fs.mkdtempSync(path.join(app.getPath('temp'), 'community-console-portal-')) : '';
+app.setPath('userData', portalData || fallback);
 
 const executable = process.env.SIERRA_WORKER_EXE || path.join(process.resourcesPath, 'SierraWorker.exe');
 const workerEnvironment = {...process.env, SIERRA_CONFIG_DIR: dataDirectory, PYTHONUTF8: '1', PYTHONUNBUFFERED: '1'};
 const workerOptions = {cwd: dataDirectory, env: workerEnvironment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']};
 const brandingFile = path.join(dataDirectory, 'branding.json');
 let screen;
+let portal;
+let developerSession;
 let worker;
 let phase = 'Stopped';
 let stopPromise;
@@ -30,7 +37,9 @@ const actionNames = new Set(['load', 'save', 'check', 'preview', 'channels', 'pu
 
 function loadBranding() {
   try {
-    return validateBranding(JSON.parse(fs.readFileSync(brandingFile, 'utf8')));
+    const branding = validateBranding(JSON.parse(fs.readFileSync(brandingFile, 'utf8')));
+    if (branding.name === legacyName) branding.name = profile.name;
+    return branding;
   } catch {
     return {name: profile.name, logo: ''};
   }
@@ -128,7 +137,33 @@ function stop() {
   return stopPromise;
 }
 
-if (!app.requestSingleInstanceLock()) {
+function openDeveloperPortal() {
+  if (portal && !portal.isDestroyed()) { portal.focus(); return; }
+  if (!developerSession) {
+    developerSession = session.fromPartition('discord-developer-portal', {cache: false});
+    developerSession.setPermissionRequestHandler((_contents, _permission, answer) => answer(false));
+    developerSession.on('will-download', (_event, item) => item.cancel());
+  }
+  portal = new BrowserWindow({title: 'Discord Developer Portal', width: 1080, height: 785,
+    webPreferences: {session: developerSession, contextIsolation: true, nodeIntegration: false, sandbox: true}});
+  portal.setMenuBarVisibility(false);
+  const isDiscord = target => {
+    try { const url = new URL(target); return url.origin === 'https://discord.com'; } catch { return false; }
+  };
+  portal.webContents.on('will-navigate', (event, url) => { if (!isDiscord(url)) event.preventDefault(); });
+  portal.webContents.on('will-redirect', (event, url) => { if (!isDiscord(url)) event.preventDefault(); });
+  portal.webContents.setWindowOpenHandler(({url}) => {
+    if (isDiscord(url)) portal.loadURL(url).catch(() => {});
+    return {action: 'deny'};
+  });
+  portal.loadURL('https://discord.com/developers/applications').catch(() => {});
+}
+
+if (setupPortal) {
+  app.whenReady().then(openDeveloperPortal);
+  app.on('window-all-closed', () => app.quit());
+  app.on('quit', () => { try { fs.rmSync(portalData, {recursive: true, force: true}); } catch {} });
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -181,6 +216,7 @@ if (!app.requestSingleInstanceLock()) {
     }
     if (action === 'info') return {value: {name: profile.name, personal: profile.personal, status: phase,
       templates: profile.templates, branding: profile.personal ? null : loadBranding()}};
+    if (action === 'developer-portal') { openDeveloperPortal(); return {value: true}; }
     if (action === 'open-discord') {
       if (!/^https:\/\/discord\.com\/channels\/[0-9]+\/[0-9]+(?:\/[0-9]+)?$/.test(payload?.url || '')) {
         return {error: 'Invalid Discord link.'};

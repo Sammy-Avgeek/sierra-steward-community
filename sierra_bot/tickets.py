@@ -30,7 +30,10 @@ class Ticket:
 
     @property
     def topic(self) -> str:
-        return f"Sierra Steward ticket #{self.id} · member {self.owner_id}"
+        return f"Community Console ticket #{self.id} · member {self.owner_id}"
+
+    def matches_topic(self, topic: str | None) -> bool:
+        return topic in (self.topic, f"Sierra Steward ticket #{self.id} · member {self.owner_id}")
 
 
 class Tickets:
@@ -157,14 +160,14 @@ class Tickets:
                     except discord.NotFound:
                         await self.mark_closed(ticket, "Channel unavailable")
                     else:
-                        if (isinstance(channel, discord.TextChannel) and channel.topic == ticket.topic
+                        if (isinstance(channel, discord.TextChannel) and ticket.matches_topic(channel.topic)
                                 and channel.name != f"closed-{ticket.id}"):
                             return channel, False
                         await self.mark_closed(ticket, "Channel archived or no longer a ticket")
                 else:
                     # Recover a channel if Discord created it before the last request returned.
                     for channel in await guild.fetch_channels():
-                        if isinstance(channel, discord.TextChannel) and channel.topic == ticket.topic:
+                        if isinstance(channel, discord.TextChannel) and ticket.matches_topic(channel.topic):
                             await self.attach(ticket, channel.id)
                             return channel, False
                     pending_route = ticket.route or TicketRoute("Support ticket", self.settings.ticket_category_id, self.settings.ticket_staff_role_id)
@@ -198,7 +201,7 @@ class Tickets:
         channel = await guild.create_text_channel(
             f"{self.settings.ticket_channel_prefix}-{ticket.id}", topic=ticket.topic, category=category,
             overwrites=overrides,
-            reason=f"Sierra Steward ticket #{ticket.id}",
+            reason=f"Community Console ticket #{ticket.id}",
         )
         await self.attach(ticket, channel.id)
         greeting = ""
@@ -247,8 +250,8 @@ class Tickets:
             except discord.NotFound:
                 await self.mark_closed(ticket, reason or "Channel unavailable")
                 return
-            if not isinstance(channel, discord.TextChannel) or channel.topic != ticket.topic:
-                raise TicketError("The channel no longer matches this Sierra Steward ticket.")
+            if not isinstance(channel, discord.TextChannel) or not ticket.matches_topic(channel.topic):
+                raise TicketError("The channel no longer matches this ticket.")
             if channel.name != f"closed-{ticket.id}":
                 if guild.me is None:
                     raise TicketError("The bot’s server permissions are unavailable.")
@@ -261,6 +264,6 @@ class Tickets:
                         )
                 await channel.edit(
                     name=f"closed-{ticket.id}", overwrites=overrides,
-                    reason=f"Sierra Steward closed ticket #{ticket.id}",
+                    reason=f"Community Console closed ticket #{ticket.id}",
                 )
             await self.mark_closed(ticket, reason or "Closed")

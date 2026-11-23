@@ -1,1 +1,1 @@
-"""Sierra Steward, a single-server Discord bot."""
+"""Community Console’s single-server Discord bot."""
